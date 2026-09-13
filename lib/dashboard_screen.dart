@@ -15,10 +15,26 @@ class _DashboardScreenState extends State<DashboardScreen> {
   bool isLoading = true;
   String searchQuery = '';
   String filtroTipo = 'Todos';
-  bool isGridView = true; // ✅ Controla vista: Grid o Lista
+  bool isGridView = true;
 
   final String policiaNumero = "+573052746650";
   final int totalCupos = 35;
+
+  // ✅ Controladores para el formulario de nuevo cupo
+  final TextEditingController _cupoController = TextEditingController();
+  final TextEditingController _placaController = TextEditingController();
+  final TextEditingController _nombreController = TextEditingController();
+  final TextEditingController _telefonoController = TextEditingController();
+  String _tipoSeleccionado = 'PASAJERO';
+
+  @override
+  void dispose() {
+    _cupoController.dispose();
+    _placaController.dispose();
+    _nombreController.dispose();
+    _telefonoController.dispose();
+    super.dispose();
+  }
 
   @override
   void initState() {
@@ -48,10 +64,198 @@ class _DashboardScreenState extends State<DashboardScreen> {
       setState(() => isLoading = false);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Error: $e")),
+          SnackBar(content: Text("Error al cargar: $e")),
         );
       }
     }
+  }
+
+  // ✅ GUARDAR NUEVO CUPO EN SUPABASE
+  Future<void> guardarNuevoCupo() async {
+    final cupo = _cupoController.text.trim();
+    final placa = _placaController.text.trim().toUpperCase();
+    final nombre = _nombreController.text.trim();
+    final telefono = _telefonoController.text.trim();
+
+    if (cupo.isEmpty || placa.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('⚠️ Cupo y Placa son obligatorios'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    final cupoOcupado = parqueadero.any((r) => r['spot'].toString() == cupo);
+    if (cupoOcupado) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('⚠️ Ese cupo ya está ocupado'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    try {
+      await Supabase.instance.client.from('parqueadero').insert({
+        'spot': int.tryParse(cupo) ?? cupo,
+        'plate': placa,
+        'name': nombre,
+        'phone': telefono,
+        'type': _tipoSeleccionado,
+      });
+
+      if (mounted) {
+        Navigator.pop(context);
+        _limpiarFormulario();
+        await cargarDatos();
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('✅ Cupo registrado correctamente'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('❌ Error al guardar: $e')),
+        );
+      }
+    }
+  }
+
+  void _limpiarFormulario() {
+    _cupoController.clear();
+    _placaController.clear();
+    _nombreController.clear();
+    _telefonoController.clear();
+    setState(() => _tipoSeleccionado = 'PASAJERO');
+  }
+
+  // ✅ FORMULARIO MODAL PARA NUEVO CUPO
+  void mostrarFormularioNuevoCupo() {
+    _limpiarFormulario();
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF1E1E1E),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
+          left: 24,
+          right: 24,
+          top: 24,
+        ),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: const [
+                  Icon(Icons.add_circle, color: Colors.green, size: 32),
+                  SizedBox(width: 12),
+                  Text(
+                    "NUEVO CUPO",
+                    style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+              _buildInputField(_cupoController, 'Número de Cupo', Icons.confirmation_number, TextInputType.number),
+              _buildInputField(_placaController, 'Placa', Icons.directions_car),
+              _buildInputField(_nombreController, 'Nombre del Dueño', Icons.person),
+              _buildInputField(_telefonoController, 'Teléfono', Icons.phone, TextInputType.phone),
+              const SizedBox(height: 10),
+              const Text("Tipo de cupo:", style: TextStyle(color: Colors.white70, fontSize: 13)),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(child: _buildTipoOption('PASAJERO', Colors.orange)),
+                  const SizedBox(width: 10),
+                  Expanded(child: _buildTipoOption('FIJO', const Color(0xFF1565C0))),
+                ],
+              ),
+              const SizedBox(height: 24),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: guardarNuevoCupo,
+                  icon: const Icon(Icons.save),
+                  label: const Text(
+                    "GUARDAR CUPO",
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.green,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    elevation: 4,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInputField(TextEditingController controller, String hint, IconData icon, [TextInputType tipo = TextInputType.text]) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: TextField(
+        controller: controller,
+        keyboardType: tipo,
+        style: const TextStyle(color: Colors.white),
+        decoration: InputDecoration(
+          hintText: hint,
+          hintStyle: const TextStyle(color: Colors.white38),
+          prefixIcon: Icon(icon, color: Colors.red),
+          filled: true,
+          fillColor: const Color(0xFF2C2C2C),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide.none,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTipoOption(String tipo, Color color) {
+    final bool activo = _tipoSeleccionado == tipo;
+    return GestureDetector(
+      onTap: () => setState(() => _tipoSeleccionado = tipo),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        decoration: BoxDecoration(
+          color: activo ? color.withOpacity(0.25) : Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: activo ? color : Colors.white24, width: 1.5),
+        ),
+        child: Center(
+          child: Text(
+            tipo,
+            style: TextStyle(color: activo ? color : Colors.white54, fontWeight: FontWeight.bold),
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> _llamarNumero(String numero) async {
@@ -61,16 +265,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
         await launchUrl(uri, mode: LaunchMode.externalApplication);
       } else {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('No se pudo abrir la app de teléfono')),
-          );
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No se pudo abrir la app de teléfono')));
         }
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error al llamar: $e')),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error al llamar: $e')));
       }
     }
   }
@@ -79,21 +279,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text("🚨 EMERGENCIA",
-            style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+        title: const Text("🚨 EMERGENCIA", style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
         content: Text("¿Llamar al número de emergencia?\nNúmero: $policiaNumero"),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text("Cancelar", style: TextStyle(color: Colors.black)),
-          ),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancelar", style: TextStyle(color: Colors.black))),
           TextButton(
             onPressed: () async {
               Navigator.pop(ctx);
               await _llamarNumero(policiaNumero);
             },
-            child: const Text("LLAMAR AHORA",
-                style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+            child: const Text("LLAMAR AHORA", style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
           ),
         ],
       ),
@@ -107,40 +302,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
           decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [color.withOpacity(0.9), color.withOpacity(0.6)],
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-            ),
+            gradient: LinearGradient(colors: [color.withOpacity(0.9), color.withOpacity(0.6)], begin: Alignment.topCenter, end: Alignment.bottomCenter),
             borderRadius: BorderRadius.circular(12),
-            boxShadow: [
-              BoxShadow(
-                color: color.withOpacity(0.4),
-                blurRadius: 8,
-                offset: const Offset(0, 3),
-              )
-            ],
+            boxShadow: [BoxShadow(color: color.withOpacity(0.4), blurRadius: 8, offset: const Offset(0, 3))],
           ),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Icon(icon, color: Colors.white, size: 16),
               const SizedBox(height: 4),
-              Text(
-                value,
-                style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                ),
-              ),
-              Text(
-                title,
-                style: const TextStyle(
-                  fontSize: 10,
-                  color: Colors.white70,
-                ),
-              ),
+              Text(value, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white)),
+              Text(title, style: const TextStyle(fontSize: 10, color: Colors.white70)),
             ],
           ),
         ),
@@ -148,57 +320,28 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  // 🟦 TARJETA FIJA (REDONDA)
   Widget _buildCupoFijo(Map<String, dynamic> registro) {
     final plate = registro['plate'] ?? 'SIN PLACA';
     final cupo = registro['spot'].toString();
-
     return GestureDetector(
       onTap: () => mostrarDetalles(registro),
       child: Container(
         decoration: BoxDecoration(
-          gradient: const LinearGradient(
-            colors: [Color(0xFF1565C0), Color(0xFF0D47A1)],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
+          gradient: const LinearGradient(colors: [Color(0xFF1565C0), Color(0xFF0D47A1)], begin: Alignment.topLeft, end: Alignment.bottomRight),
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: Colors.white, width: 1),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.2),
-              blurRadius: 4,
-              offset: const Offset(0, 2),
-            ),
-          ],
+          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 4, offset: const Offset(0, 2))],
         ),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.directions_car, color: Colors.white, size: 20),
+            const Icon(Icons.directions_car, color: Colors.white, size: 20),
             const SizedBox(height: 2),
-            Text(
-              "#$cupo",
-              style: const TextStyle(
-                fontSize: 9,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-              ),
-            ),
+            Text("#$cupo", style: const TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.white)),
             const Divider(height: 3, color: Colors.white54),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 2),
-              child: Text(
-                plate,
-                style: const TextStyle(
-                  fontSize: 9,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.center,
-              ),
+              child: Text(plate, style: const TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.white), maxLines: 1, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center),
             ),
           ],
         ),
@@ -206,57 +349,28 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  // 🟧 TARJETA PASAJERO (REDONDA)
   Widget _buildCupoPasajero(Map<String, dynamic> registro) {
     final plate = registro['plate'] ?? 'SIN PLACA';
     final cupo = registro['spot'].toString();
-
     return GestureDetector(
       onTap: () => mostrarDetalles(registro),
       child: Container(
         decoration: BoxDecoration(
-          gradient: const LinearGradient(
-            colors: [Color(0xFFFF6F00), Color(0xFFE65100)],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
+          gradient: const LinearGradient(colors: [Color(0xFFFF6F00), Color(0xFFE65100)], begin: Alignment.topLeft, end: Alignment.bottomRight),
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: Colors.white, width: 1),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.2),
-              blurRadius: 4,
-              offset: const Offset(0, 2),
-            ),
-          ],
+          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 4, offset: const Offset(0, 2))],
         ),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.directions_car, color: Colors.white, size: 20),
+            const Icon(Icons.directions_car, color: Colors.white, size: 20),
             const SizedBox(height: 2),
-            Text(
-              "#$cupo",
-              style: const TextStyle(
-                fontSize: 9,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-              ),
-            ),
+            Text("#$cupo", style: const TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.white)),
             const Divider(height: 3, color: Colors.white54),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 2),
-              child: Text(
-                plate,
-                style: const TextStyle(
-                  fontSize: 9,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.center,
-              ),
+              child: Text(plate, style: const TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.white), maxLines: 1, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center),
             ),
           ],
         ),
@@ -264,18 +378,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  // 🟢 TARJETA LIBRE (REDONDA)
   Widget _buildCupoVacio() {
     return Container(
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [
-            Colors.green.withOpacity(0.3),
-            Colors.green.withOpacity(0.5),
-          ],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
+        gradient: LinearGradient(colors: [Colors.green.withOpacity(0.3), Colors.green.withOpacity(0.5)], begin: Alignment.topLeft, end: Alignment.bottomRight),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: Colors.green, width: 1.5),
       ),
@@ -284,90 +390,45 @@ class _DashboardScreenState extends State<DashboardScreen> {
         children: [
           const Icon(Icons.check_circle, color: Colors.white, size: 18),
           const SizedBox(height: 2),
-          const Text(
-            "LIBRE",
-            style: TextStyle(
-              fontSize: 9,
-              fontWeight: FontWeight.bold,
-              color: Colors.white,
-            ),
-          ),
+          const Text("LIBRE", style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.white)),
         ],
       ),
     );
   }
 
-  // ✅ TARJETA EN VISTA LISTA
   Widget _buildListItem(Map<String, dynamic> registro) {
     final plate = registro['plate'] ?? 'SIN PLACA';
     final cupo = registro['spot'].toString();
     final tipo = registro['type'] ?? 'PASAJERO';
     final isFijo = tipo == 'FIJO';
-
     return GestureDetector(
       onTap: () => mostrarDetalles(registro),
       child: Container(
         margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
         decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: isFijo
-                ? [const Color(0xFF1565C0), const Color(0xFF0D47A1)]
-                : [const Color(0xFFFF6F00), const Color(0xFFE65100)],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
+          gradient: LinearGradient(colors: isFijo ? [const Color(0xFF1565C0), const Color(0xFF0D47A1)] : [const Color(0xFFFF6F00), const Color(0xFFE65100)], begin: Alignment.topLeft, end: Alignment.bottomRight),
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: Colors.white, width: 1),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.2),
-              blurRadius: 4,
-              offset: const Offset(0, 2),
-            ),
-          ],
+          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 4, offset: const Offset(0, 2))],
         ),
         child: Padding(
           padding: const EdgeInsets.all(12),
           child: Row(
             children: [
-              Icon(
-                Icons.directions_car,
-                color: Colors.white,
-                size: 28,
-              ),
+              const Icon(Icons.directions_car, color: Colors.white, size: 28),
               const SizedBox(width: 12),
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    "Cupo #$cupo",
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                    ),
-                  ),
+                  Text("Cupo #$cupo", style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
                   const SizedBox(height: 4),
-                  Text(
-                    isFijo ? 'FIJO' : 'PASAJERO',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.white70,
-                    ),
-                  ),
+                  Text(isFijo ? 'FIJO' : 'PASAJERO', style: TextStyle(fontSize: 12, color: Colors.white70)),
                   const SizedBox(height: 4),
-                  Text(
-                    plate,
-                    style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                    ),
-                  ),
+                  Text(plate, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white)),
                 ],
               ),
               const Spacer(),
-              Icon(Icons.arrow_forward_ios, color: Colors.white54, size: 16),
+              const Icon(Icons.arrow_forward_ios, color: Colors.white54, size: 16),
             ],
           ),
         ),
@@ -377,7 +438,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   List<dynamic> getFilteredCupos() {
     List<dynamic> resultados = parqueadero;
-
     if (searchQuery.isNotEmpty) {
       final query = searchQuery.toLowerCase();
       resultados = resultados.where((r) {
@@ -387,7 +447,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
         return plate.contains(query) || nombre.contains(query) || spot.contains(query);
       }).toList();
     }
-
     if (filtroTipo != 'Todos') {
       if (filtroTipo == 'Libres') {
         resultados = [];
@@ -396,21 +455,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
         resultados = resultados.where((r) => r['type'] == tipoBD).toList();
       }
     }
-
     return resultados;
   }
 
   int _getTotalItemsToShow(int filteredCount) {
-    if (filtroTipo == 'Fijos' || filtroTipo == 'Pasajeros') {
-      return filteredCount;
-    } else if (filtroTipo == 'Libres') {
-      return totalCupos - parqueadero.length;
-    } else {
-      return filteredCount + (totalCupos - parqueadero.length);
-    }
+    if (filtroTipo == 'Fijos' || filtroTipo == 'Pasajeros') return filteredCount;
+    else if (filtroTipo == 'Libres') return totalCupos - parqueadero.length;
+    else return filteredCount + (totalCupos - parqueadero.length);
   }
 
-  // ✅ FUNCIÓN PARA FORMATO DE FECHA/HORA SIN intl
   String _obtenerFechaHora() {
     final now = DateTime.now();
     final dia = now.day.toString().padLeft(2, '0');
@@ -440,15 +493,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
             onPressed: llamarEmergencia,
             backgroundColor: Colors.white,
             elevation: 6,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-              side: const BorderSide(color: Colors.red, width: 2),
-            ),
-            child: const Icon(
-              Icons.warning_amber_rounded,
-              size: 28,
-              color: Colors.black,
-            ),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: Colors.red, width: 2)),
+            child: const Icon(Icons.warning_amber_rounded, size: 28, color: Colors.black),
           ),
         ),
         title: Row(
@@ -464,28 +510,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 color: Colors.red,
                 fontStyle: FontStyle.italic,
                 letterSpacing: 0.8,
-                shadows: [
-                  Shadow(
-                    color: Colors.red.withOpacity(0.6),
-                    offset: const Offset(2, 2),
-                    blurRadius: 6,
-                  ),
-                ],
+                shadows: [Shadow(color: Colors.red.withOpacity(0.6), offset: const Offset(2, 2), blurRadius: 6)],
               ),
             ),
           ],
         ),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh, color: Colors.red, size: 24),
-            onPressed: cargarDatos,
-            tooltip: "Actualizar datos",
-          ),
-          IconButton(
-            icon: Icon(isGridView ? Icons.list : Icons.grid_view, color: Colors.red, size: 24),
-            onPressed: () => setState(() => isGridView = !isGridView),
-            tooltip: isGridView ? "Vista Lista" : "Vista Grid",
-          ),
+          IconButton(icon: const Icon(Icons.refresh, color: Colors.red, size: 24), onPressed: cargarDatos, tooltip: "Actualizar datos"),
+          IconButton(icon: Icon(isGridView ? Icons.list : Icons.grid_view, color: Colors.red, size: 24), onPressed: () => setState(() => isGridView = !isGridView), tooltip: isGridView ? "Vista Lista" : "Vista Grid"),
           const SizedBox(width: 8),
         ],
       ),
@@ -495,17 +527,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
               color: const Color(0xFF1E1E1E),
-              borderRadius: const BorderRadius.only(
-                bottomLeft: Radius.circular(24),
-                bottomRight: Radius.circular(24),
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.2),
-                  blurRadius: 10,
-                  offset: const Offset(0, -2),
-                ),
-              ],
+              borderRadius: const BorderRadius.only(bottomLeft: Radius.circular(24), bottomRight: Radius.circular(24)),
+              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 10, offset: const Offset(0, -2))],
             ),
             child: Column(
               children: [
@@ -517,26 +540,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         color: const Color(0xFF2C2C2C),
                         borderRadius: BorderRadius.circular(30),
                         border: Border.all(color: Colors.red.withOpacity(0.6), width: 2),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.red.withOpacity(0.3),
-                            blurRadius: 12,
-                            offset: const Offset(0, 4),
-                          ),
-                        ],
+                        boxShadow: [BoxShadow(color: Colors.red.withOpacity(0.3), blurRadius: 12, offset: const Offset(0, 4))],
                       ),
                       child: TextField(
                         onChanged: (value) => setState(() => searchQuery = value),
                         style: const TextStyle(color: Colors.white, fontSize: 14),
                         textAlign: TextAlign.center,
-                        decoration: const InputDecoration(
-                          hintText: "🔍 Buscar placa, dueño o cupo...",
-                          hintStyle: TextStyle(color: Colors.white54, fontSize: 13),
-                          border: InputBorder.none,
-                          contentPadding:
-                              EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-                          prefixIcon: Icon(Icons.search, color: Colors.red),
-                        ),
+                        decoration: const InputDecoration(hintText: "🔍 Buscar placa, dueño o cupo...", hintStyle: TextStyle(color: Colors.white54, fontSize: 13), border: InputBorder.none, contentPadding: EdgeInsets.symmetric(horizontal: 24, vertical: 14), prefixIcon: Icon(Icons.search, color: Colors.red)),
                       ),
                     ),
                   ),
@@ -569,66 +579,40 @@ class _DashboardScreenState extends State<DashboardScreen> {
             child: isLoading
                 ? const Center(child: CircularProgressIndicator(color: Colors.red))
                 : filteredCupos.isEmpty && filtroTipo != 'Libres'
-                    ? const Center(
-                        child: Text(
-                          "No se encontraron cupos",
-                          style: TextStyle(color: Colors.white54, fontSize: 16),
-                        ),
-                      )
+                    ? const Center(child: Text("No se encontraron cupos", style: TextStyle(color: Colors.white54, fontSize: 16)))
                     : isGridView
                         ? Padding(
                             padding: const EdgeInsets.all(6),
                             child: GridView.builder(
-                              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                                crossAxisCount: 7,
-                                childAspectRatio: 0.6,
-                                crossAxisSpacing: 4,
-                                mainAxisSpacing: 4,
-                              ),
+                              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 7, childAspectRatio: 0.6, crossAxisSpacing: 4, mainAxisSpacing: 4),
                               itemCount: _getTotalItemsToShow(filteredCupos.length),
                               itemBuilder: (context, index) {
                                 if (index < filteredCupos.length) {
                                   final registro = filteredCupos[index];
                                   final tipo = registro['type'];
-                                  if (tipo == 'FIJO') {
-                                    return _buildCupoFijo(registro);
-                                  } else {
-                                    return _buildCupoPasajero(registro);
-                                  }
+                                  if (tipo == 'FIJO') return _buildCupoFijo(registro);
+                                  else return _buildCupoPasajero(registro);
                                 } else {
-                                  if (filtroTipo == 'Todos' || filtroTipo == 'Libres') {
-                                    return _buildCupoVacio();
-                                  }
+                                  if (filtroTipo == 'Todos' || filtroTipo == 'Libres') return _buildCupoVacio();
                                   return const SizedBox.shrink();
                                 }
                               },
                             ),
                           )
-                        : ListView.builder(
-                            padding: const EdgeInsets.all(10),
-                            itemCount: filteredCupos.length,
-                            itemBuilder: (context, index) {
-                              return _buildListItem(filteredCupos[index]);
-                            },
-                          ),
+                        : ListView.builder(padding: const EdgeInsets.all(10), itemCount: filteredCupos.length, itemBuilder: (context, index) => _buildListItem(filteredCupos[index])),
           ),
           Padding(
             padding: const EdgeInsets.all(10),
-            child: Align(
-              alignment: Alignment.bottomRight,
-              child: Text(
-                "By Wilson R.",
-                style: TextStyle(
-                  fontSize: 11,
-                  color: Colors.white.withOpacity(0.4),
-                  fontStyle: FontStyle.italic,
-                  fontWeight: FontWeight.w300,
-                  letterSpacing: 0.5,
-                ),
-              ),
-            ),
+            child: Align(alignment: Alignment.bottomRight, child: Text("By Wilson R.", style: TextStyle(fontSize: 11, color: Colors.white.withOpacity(0.4), fontStyle: FontStyle.italic, fontWeight: FontWeight.w300, letterSpacing: 0.5))),
           ),
         ],
+      ),
+      // ✅ BOTÓN FLOTANTE PARA AGREGAR NUEVO CUPO
+      floatingActionButton: FloatingActionButton(
+        onPressed: mostrarFormularioNuevoCupo,
+        backgroundColor: Colors.green,
+        child: const Icon(Icons.add, color: Colors.white),
+        tooltip: 'Agregar Nuevo Cupo',
       ),
     );
   }
@@ -645,24 +629,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
             decoration: BoxDecoration(
               color: activo ? color.withOpacity(0.2) : Colors.transparent,
               borderRadius: BorderRadius.circular(20),
-              border: Border.all(
-                color: activo ? color : Colors.white.withOpacity(0.2),
-                width: 1,
-              ),
+              border: Border.all(color: activo ? color : Colors.white.withOpacity(0.2), width: 1),
             ),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Icon(icon, size: 16, color: activo ? color : Colors.white70),
                 const SizedBox(width: 4),
-                Text(
-                  texto,
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
-                    color: activo ? color : Colors.white70,
-                  ),
-                ),
+                Text(texto, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: activo ? color : Colors.white70)),
               ],
             ),
           ),
@@ -675,16 +649,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final tipo = registro['type'];
     final esFijo = tipo == 'FIJO';
     final cupo = registro['spot'].toString();
-    // ✅ FORMATO DE FECHA/HORA SIN intl
     final fechaActual = _obtenerFechaHora();
 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: const Color(0xFF1E1E1E),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       builder: (ctx) => Padding(
         padding: const EdgeInsets.all(24),
         child: Column(
@@ -698,22 +669,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      "Cupo #$cupo",
-                      style: const TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                      ),
-                    ),
-                    Text(
-                      esFijo ? 'FIJO' : 'PASAJERO',
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: esFijo ? const Color(0xFF1565C0) : const Color(0xFFFF6F00),
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
+                    Text("Cupo #$cupo", style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white)),
+                    Text(esFijo ? 'FIJO' : 'PASAJERO', style: TextStyle(fontSize: 14, color: esFijo ? const Color(0xFF1565C0) : const Color(0xFFFF6F00), fontWeight: FontWeight.w600)),
                   ],
                 ),
               ],
@@ -722,12 +679,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
             Center(
               child: Container(
                 padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(12),
-                ),
+                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
                 child: QrImageView(
-                  // ✅ QR CON FORMATO LEGIBLE Y FECHA/HORA SIN intl
                   data: 'PARQUEADERO CALYPSO\nCupo: $cupo\nPlaca: ${registro['plate'] ?? 'SIN_PLACA'}\nDueño: ${registro['name'] ?? 'SIN_NOMBRE'}\nGenerado: $fechaActual',
                   version: QrVersions.auto,
                   size: 120.0,
@@ -749,17 +702,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 child: ElevatedButton.icon(
                   onPressed: () => _llamarNumero(registro['phone'].toString()),
                   icon: const Icon(Icons.call, size: 20),
-                  label: const Text(
-                    "Llamar al dueño",
-                    style: TextStyle(fontSize: 14),
-                  ),
+                  label: const Text("Llamar al dueño", style: TextStyle(fontSize: 14)),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.red,
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     elevation: 4,
                   ),
                 ),
@@ -775,23 +723,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(
         children: [
-          SizedBox(
-            width: 70,
-            child: Text(
-              "$label:",
-              style: const TextStyle(
-                fontWeight: FontWeight.w700,
-                color: Colors.white70,
-                fontSize: 13,
-              ),
-            ),
-          ),
-          Expanded(
-            child: Text(
-              value,
-              style: const TextStyle(fontSize: 13, color: Colors.white),
-            ),
-          ),
+          SizedBox(width: 70, child: Text("$label:", style: const TextStyle(fontWeight: FontWeight.w700, color: Colors.white70, fontSize: 13))),
+          Expanded(child: Text(value, style: const TextStyle(fontSize: 13, color: Colors.white))),
         ],
       ),
     );
