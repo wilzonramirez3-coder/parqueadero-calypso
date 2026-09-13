@@ -1,0 +1,799 @@
+import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:qr_flutter/qr_flutter.dart';
+
+class DashboardScreen extends StatefulWidget {
+  const DashboardScreen({super.key});
+
+  @override
+  State<DashboardScreen> createState() => _DashboardScreenState();
+}
+
+class _DashboardScreenState extends State<DashboardScreen> {
+  List<dynamic> parqueadero = [];
+  bool isLoading = true;
+  String searchQuery = '';
+  String filtroTipo = 'Todos';
+  bool isGridView = true; // ✅ Controla vista: Grid o Lista
+
+  final String policiaNumero = "+573052746650";
+  final int totalCupos = 35;
+
+  @override
+  void initState() {
+    super.initState();
+    cargarDatos();
+  }
+
+  Future<void> cargarDatos() async {
+    setState(() => isLoading = true);
+    try {
+      final response = await Supabase.instance.client.from('parqueadero').select('*');
+      setState(() {
+        parqueadero = response;
+        isLoading = false;
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('✅ Datos actualizados'),
+            duration: Duration(seconds: 2),
+            backgroundColor: Colors.green,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      setState(() => isLoading = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Error: $e")),
+        );
+      }
+    }
+  }
+
+  Future<void> _llamarNumero(String numero) async {
+    final uri = Uri.parse('tel:$numero');
+    try {
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('No se pudo abrir la app de teléfono')),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error al llamar: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> llamarEmergencia() async {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("🚨 EMERGENCIA",
+            style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+        content: Text("¿Llamar al número de emergencia?\nNúmero: $policiaNumero"),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text("Cancelar", style: TextStyle(color: Colors.black)),
+          ),
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(ctx);
+              await _llamarNumero(policiaNumero);
+            },
+            child: const Text("LLAMAR AHORA",
+                style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatBar(String title, String value, IconData icon, Color color) {
+    return Expanded(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [color.withOpacity(0.9), color.withOpacity(0.6)],
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+            ),
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(
+                color: color.withOpacity(0.4),
+                blurRadius: 8,
+                offset: const Offset(0, 3),
+              )
+            ],
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, color: Colors.white, size: 16),
+              const SizedBox(height: 4),
+              Text(
+                value,
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+              Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 10,
+                  color: Colors.white70,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // 🟦 TARJETA FIJA (REDONDA)
+  Widget _buildCupoFijo(Map<String, dynamic> registro) {
+    final plate = registro['plate'] ?? 'SIN PLACA';
+    final cupo = registro['spot'].toString();
+
+    return GestureDetector(
+      onTap: () => mostrarDetalles(registro),
+      child: Container(
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            colors: [Color(0xFF1565C0), Color(0xFF0D47A1)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.white, width: 1),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.2),
+              blurRadius: 4,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.directions_car, color: Colors.white, size: 20),
+            const SizedBox(height: 2),
+            Text(
+              "#$cupo",
+              style: const TextStyle(
+                fontSize: 9,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
+            ),
+            const Divider(height: 3, color: Colors.white54),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 2),
+              child: Text(
+                plate,
+                style: const TextStyle(
+                  fontSize: 9,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // 🟧 TARJETA PASAJERO (REDONDA)
+  Widget _buildCupoPasajero(Map<String, dynamic> registro) {
+    final plate = registro['plate'] ?? 'SIN PLACA';
+    final cupo = registro['spot'].toString();
+
+    return GestureDetector(
+      onTap: () => mostrarDetalles(registro),
+      child: Container(
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            colors: [Color(0xFFFF6F00), Color(0xFFE65100)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.white, width: 1),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.2),
+              blurRadius: 4,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.directions_car, color: Colors.white, size: 20),
+            const SizedBox(height: 2),
+            Text(
+              "#$cupo",
+              style: const TextStyle(
+                fontSize: 9,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
+            ),
+            const Divider(height: 3, color: Colors.white54),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 2),
+              child: Text(
+                plate,
+                style: const TextStyle(
+                  fontSize: 9,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // 🟢 TARJETA LIBRE (REDONDA)
+  Widget _buildCupoVacio() {
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            Colors.green.withOpacity(0.3),
+            Colors.green.withOpacity(0.5),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.green, width: 1.5),
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.check_circle, color: Colors.white, size: 18),
+          const SizedBox(height: 2),
+          const Text(
+            "LIBRE",
+            style: TextStyle(
+              fontSize: 9,
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ✅ TARJETA EN VISTA LISTA
+  Widget _buildListItem(Map<String, dynamic> registro) {
+    final plate = registro['plate'] ?? 'SIN PLACA';
+    final cupo = registro['spot'].toString();
+    final tipo = registro['type'] ?? 'PASAJERO';
+    final isFijo = tipo == 'FIJO';
+
+    return GestureDetector(
+      onTap: () => mostrarDetalles(registro),
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: isFijo
+                ? [const Color(0xFF1565C0), const Color(0xFF0D47A1)]
+                : [const Color(0xFFFF6F00), const Color(0xFFE65100)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.white, width: 1),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.2),
+              blurRadius: 4,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            children: [
+              Icon(
+                Icons.directions_car,
+                color: Colors.white,
+                size: 28,
+              ),
+              const SizedBox(width: 12),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    "Cupo #$cupo",
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    isFijo ? 'FIJO' : 'PASAJERO',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.white70,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    plate,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                ],
+              ),
+              const Spacer(),
+              Icon(Icons.arrow_forward_ios, color: Colors.white54, size: 16),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  List<dynamic> getFilteredCupos() {
+    List<dynamic> resultados = parqueadero;
+
+    if (searchQuery.isNotEmpty) {
+      final query = searchQuery.toLowerCase();
+      resultados = resultados.where((r) {
+        final plate = r['plate']?.toLowerCase() ?? '';
+        final nombre = r['name']?.toLowerCase() ?? '';
+        final spot = r['spot']?.toString().toLowerCase() ?? '';
+        return plate.contains(query) || nombre.contains(query) || spot.contains(query);
+      }).toList();
+    }
+
+    if (filtroTipo != 'Todos') {
+      if (filtroTipo == 'Libres') {
+        resultados = [];
+      } else {
+        String tipoBD = filtroTipo.toUpperCase();
+        resultados = resultados.where((r) => r['type'] == tipoBD).toList();
+      }
+    }
+
+    return resultados;
+  }
+
+  int _getTotalItemsToShow(int filteredCount) {
+    if (filtroTipo == 'Fijos' || filtroTipo == 'Pasajeros') {
+      return filteredCount;
+    } else if (filtroTipo == 'Libres') {
+      return totalCupos - parqueadero.length;
+    } else {
+      return filteredCount + (totalCupos - parqueadero.length);
+    }
+  }
+
+  // ✅ FUNCIÓN PARA FORMATO DE FECHA/HORA SIN intl
+  String _obtenerFechaHora() {
+    final now = DateTime.now();
+    final dia = now.day.toString().padLeft(2, '0');
+    final mes = now.month.toString().padLeft(2, '0');
+    final anio = now.year;
+    final hora = now.hour.toString().padLeft(2, '0');
+    final min = now.minute.toString().padLeft(2, '0');
+    return '$dia/$mes/$anio $hora:$min';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final filteredCupos = getFilteredCupos();
+    final fijos = parqueadero.where((r) => r['type'] == 'FIJO').length;
+    final pasajeros = parqueadero.where((r) => r['type'] == 'PASAJERO').length;
+    final disponibles = totalCupos - parqueadero.length;
+
+    return Scaffold(
+      backgroundColor: const Color(0xFF121212),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF1E1E1E),
+        elevation: 0,
+        centerTitle: true,
+        leading: Padding(
+          padding: const EdgeInsets.all(4.0),
+          child: FloatingActionButton(
+            onPressed: llamarEmergencia,
+            backgroundColor: Colors.white,
+            elevation: 6,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+              side: const BorderSide(color: Colors.red, width: 2),
+            ),
+            child: const Icon(
+              Icons.warning_amber_rounded,
+              size: 28,
+              color: Colors.black,
+            ),
+          ),
+        ),
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.directions_car, color: Colors.red, size: 24),
+            const SizedBox(width: 8),
+            Text(
+              "PARQUEADERO CALYPSO",
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w800,
+                color: Colors.red,
+                fontStyle: FontStyle.italic,
+                letterSpacing: 0.8,
+                shadows: [
+                  Shadow(
+                    color: Colors.red.withOpacity(0.6),
+                    offset: const Offset(2, 2),
+                    blurRadius: 6,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh, color: Colors.red, size: 24),
+            onPressed: cargarDatos,
+            tooltip: "Actualizar datos",
+          ),
+          IconButton(
+            icon: Icon(isGridView ? Icons.list : Icons.grid_view, color: Colors.red, size: 24),
+            onPressed: () => setState(() => isGridView = !isGridView),
+            tooltip: isGridView ? "Vista Lista" : "Vista Grid",
+          ),
+          const SizedBox(width: 8),
+        ],
+      ),
+      body: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: const Color(0xFF1E1E1E),
+              borderRadius: const BorderRadius.only(
+                bottomLeft: Radius.circular(24),
+                bottomRight: Radius.circular(24),
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.2),
+                  blurRadius: 10,
+                  offset: const Offset(0, -2),
+                ),
+              ],
+            ),
+            child: Column(
+              children: [
+                Center(
+                  child: SizedBox(
+                    width: 280,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF2C2C2C),
+                        borderRadius: BorderRadius.circular(30),
+                        border: Border.all(color: Colors.red.withOpacity(0.6), width: 2),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.red.withOpacity(0.3),
+                            blurRadius: 12,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
+                      ),
+                      child: TextField(
+                        onChanged: (value) => setState(() => searchQuery = value),
+                        style: const TextStyle(color: Colors.white, fontSize: 14),
+                        textAlign: TextAlign.center,
+                        decoration: const InputDecoration(
+                          hintText: "🔍 Buscar placa, dueño o cupo...",
+                          hintStyle: TextStyle(color: Colors.white54, fontSize: 13),
+                          border: InputBorder.none,
+                          contentPadding:
+                              EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                          prefixIcon: Icon(Icons.search, color: Colors.red),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                if (!isLoading && parqueadero.isNotEmpty)
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                      _buildFiltroButton('Todos', Icons.filter_list, Colors.white),
+                      _buildFiltroButton('Fijos', Icons.house, const Color(0xFF1565C0)),
+                      _buildFiltroButton('Pasajeros', Icons.person, const Color(0xFFFF6F00)),
+                      _buildFiltroButton('Libres', Icons.check_circle, Colors.green),
+                    ],
+                  ),
+                const SizedBox(height: 14),
+                if (filtroTipo == 'Todos' && !isLoading && parqueadero.isNotEmpty)
+                  Row(
+                    children: [
+                      _buildStatBar("Fijos", "$fijos", Icons.house, const Color(0xFF1565C0)),
+                      _buildStatBar("Pasajeros", "$pasajeros", Icons.person, const Color(0xFFFF6F00)),
+                      _buildStatBar("Disponibles", "$disponibles", Icons.check_circle, Colors.green),
+                      _buildStatBar("Total", "$totalCupos", Icons.car_rental, Colors.purple),
+                    ],
+                  ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: isLoading
+                ? const Center(child: CircularProgressIndicator(color: Colors.red))
+                : filteredCupos.isEmpty && filtroTipo != 'Libres'
+                    ? const Center(
+                        child: Text(
+                          "No se encontraron cupos",
+                          style: TextStyle(color: Colors.white54, fontSize: 16),
+                        ),
+                      )
+                    : isGridView
+                        ? Padding(
+                            padding: const EdgeInsets.all(6),
+                            child: GridView.builder(
+                              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: 7,
+                                childAspectRatio: 0.6,
+                                crossAxisSpacing: 4,
+                                mainAxisSpacing: 4,
+                              ),
+                              itemCount: _getTotalItemsToShow(filteredCupos.length),
+                              itemBuilder: (context, index) {
+                                if (index < filteredCupos.length) {
+                                  final registro = filteredCupos[index];
+                                  final tipo = registro['type'];
+                                  if (tipo == 'FIJO') {
+                                    return _buildCupoFijo(registro);
+                                  } else {
+                                    return _buildCupoPasajero(registro);
+                                  }
+                                } else {
+                                  if (filtroTipo == 'Todos' || filtroTipo == 'Libres') {
+                                    return _buildCupoVacio();
+                                  }
+                                  return const SizedBox.shrink();
+                                }
+                              },
+                            ),
+                          )
+                        : ListView.builder(
+                            padding: const EdgeInsets.all(10),
+                            itemCount: filteredCupos.length,
+                            itemBuilder: (context, index) {
+                              return _buildListItem(filteredCupos[index]);
+                            },
+                          ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(10),
+            child: Align(
+              alignment: Alignment.bottomRight,
+              child: Text(
+                "By Wilson R.",
+                style: TextStyle(
+                  fontSize: 11,
+                  color: Colors.white.withOpacity(0.4),
+                  fontStyle: FontStyle.italic,
+                  fontWeight: FontWeight.w300,
+                  letterSpacing: 0.5,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFiltroButton(String texto, IconData icon, Color color) {
+    final bool activo = filtroTipo == texto;
+    return Expanded(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 2),
+        child: GestureDetector(
+          onTap: () => setState(() => filtroTipo = texto),
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            decoration: BoxDecoration(
+              color: activo ? color.withOpacity(0.2) : Colors.transparent,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: activo ? color : Colors.white.withOpacity(0.2),
+                width: 1,
+              ),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(icon, size: 16, color: activo ? color : Colors.white70),
+                const SizedBox(width: 4),
+                Text(
+                  texto,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    color: activo ? color : Colors.white70,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void mostrarDetalles(Map<String, dynamic> registro) {
+    final tipo = registro['type'];
+    final esFijo = tipo == 'FIJO';
+    final cupo = registro['spot'].toString();
+    // ✅ FORMATO DE FECHA/HORA SIN intl
+    final fechaActual = _obtenerFechaHora();
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF1E1E1E),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.car_rental, color: Colors.red, size: 32),
+                const SizedBox(width: 12),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      "Cupo #$cupo",
+                      style: const TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
+                    ),
+                    Text(
+                      esFijo ? 'FIJO' : 'PASAJERO',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: esFijo ? const Color(0xFF1565C0) : const Color(0xFFFF6F00),
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            Center(
+              child: Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: QrImageView(
+                  // ✅ QR CON FORMATO LEGIBLE Y FECHA/HORA SIN intl
+                  data: 'PARQUEADERO CALYPSO\nCupo: $cupo\nPlaca: ${registro['plate'] ?? 'SIN_PLACA'}\nDueño: ${registro['name'] ?? 'SIN_NOMBRE'}\nGenerado: $fechaActual',
+                  version: QrVersions.auto,
+                  size: 120.0,
+                  foregroundColor: Colors.black,
+                  backgroundColor: Colors.white,
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+            const Divider(color: Colors.white12, height: 1),
+            const SizedBox(height: 16),
+            _buildDetailRow("PLACA", registro['plate'] ?? 'Sin placa'),
+            _buildDetailRow("DUEÑO", registro['name'] ?? 'Sin nombre'),
+            _buildDetailRow("TELÉFONO", registro['phone'] ?? 'Sin teléfono'),
+            const SizedBox(height: 20),
+            if (registro['phone'] != null && registro['phone'] != '')
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: () => _llamarNumero(registro['phone'].toString()),
+                  icon: const Icon(Icons.call, size: 20),
+                  label: const Text(
+                    "Llamar al dueño",
+                    style: TextStyle(fontSize: 14),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.red,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    elevation: 4,
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDetailRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 70,
+            child: Text(
+              "$label:",
+              style: const TextStyle(
+                fontWeight: FontWeight.w700,
+                color: Colors.white70,
+                fontSize: 13,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: const TextStyle(fontSize: 13, color: Colors.white),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}

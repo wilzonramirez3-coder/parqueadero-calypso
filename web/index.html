@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base href="$FLUTTER_BASE_HREF">
+
+  <meta charset="UTF-8">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="description" content="Sistema de parqueadero como PWA.">
+
+  <!-- iOS meta tags & icons -->
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="Parqueadero Calypso">
+  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/png" href="favicon.png"/>
+
+  <title>Parqueadero Calypso</title>
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#0175C2">
+</head>
+<body>
+  <script src="flutter_bootstrap.js" async></script>
+
+  <!-- Registro del Service Worker -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('flutter_service_worker.js')
+        .then((registration) => {
+          console.log('✅ Service Worker registrado:', registration);
+        })
+        .catch((error) => {
+          console.log('❌ Error al registrar Service Worker:', error);
+        });
+    }
+  </script>
+</body>
+</html>
