@@ -1,11 +1,6 @@
 {
-  "builds": [
-    {
-      "src": "pubspec.yaml",
-      "use": "@vercel/static-build",
-      "config": {
-        "distDir": "build/web"
-      }
-    }
+  "cleanUrls": true,
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
