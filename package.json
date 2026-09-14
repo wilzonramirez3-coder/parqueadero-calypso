@@ -1,0 +1,6 @@
+{
+  "name": "parqueadero-calypso",
+  "scripts": {
+    "build": "bash build.sh"
+  }
+}
