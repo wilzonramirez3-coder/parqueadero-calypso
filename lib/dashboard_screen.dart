@@ -16,19 +16,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
   String searchQuery = '';
   String filtroTipo = 'Todos';
   bool isGridView = true;
-
   final String policiaNumero = "+573052746650";
   final int totalCupos = 35;
 
-  // ✅ Controladores para el formulario de nuevo cupo
+  // Controladores para el formulario
   final TextEditingController _cupoController = TextEditingController();
   final TextEditingController _placaController = TextEditingController();
   final TextEditingController _nombreController = TextEditingController();
   final TextEditingController _telefonoController = TextEditingController();
   String _tipoSeleccionado = 'PASAJERO';
 
+  // Canal para tiempo real
+  RealtimeChannel? _channel;
+
   @override
   void dispose() {
+    _channel?.unsubscribe(); // ✅ Limpieza segura
     _cupoController.dispose();
     _placaController.dispose();
     _nombreController.dispose();
@@ -39,25 +42,36 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   void initState() {
     super.initState();
-    cargarDatos();
+    cargarDatos(mostrarMensaje: false);
+    _suscribirseCambios();
   }
 
-  Future<void> cargarDatos() async {
+  void _suscribirseCambios() {
+    _channel = Supabase.instance.client
+        .channel('parqueadero_changes')
+      ..onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public',
+        table: 'parqueadero',
+        callback: (_) => cargarDatos(mostrarMensaje: false),
+      )
+      ..subscribe();
+  }
+
+  Future<void> cargarDatos({bool mostrarMensaje = false}) async {
     setState(() => isLoading = true);
     try {
-      final response = await Supabase.instance.client.from('parqueadero').select('*');
+      final response = await Supabase.instance.client
+          .from('parqueadero')
+          .select()
+          .order('spot');
       setState(() {
         parqueadero = response;
         isLoading = false;
       });
-      if (mounted) {
+      if (mostrarMensaje && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('✅ Datos actualizados'),
-            duration: Duration(seconds: 2),
-            backgroundColor: Colors.green,
-            behavior: SnackBarBehavior.floating,
-          ),
+          const SnackBar(content: Text('✅ Datos actualizados'), duration: Duration(seconds: 2), backgroundColor: Colors.green, behavior: SnackBarBehavior.floating),
         );
       }
     } catch (e) {
@@ -70,7 +84,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
-  // ✅ GUARDAR NUEVO CUPO EN SUPABASE
   Future<void> guardarNuevoCupo() async {
     final cupo = _cupoController.text.trim();
     final placa = _placaController.text.trim().toUpperCase();
@@ -79,52 +92,79 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     if (cupo.isEmpty || placa.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('⚠️ Cupo y Placa son obligatorios'),
-          backgroundColor: Colors.orange,
-        ),
+        const SnackBar(content: Text('⚠️ Cupo y Placa son obligatorios'), backgroundColor: Colors.orange),
       );
       return;
     }
 
-    final cupoOcupado = parqueadero.any((r) => r['spot'].toString() == cupo);
+    final cupoInt = int.tryParse(cupo);
+    if (cupoInt == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('⚠️ Cupo debe ser un número válido'), backgroundColor: Colors.orange),
+      );
+      return;
+    }
+
+    final cupoOcupado = parqueadero.any((r) => r['spot'] == cupoInt);
     if (cupoOcupado) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('⚠️ Ese cupo ya está ocupado'),
-          backgroundColor: Colors.orange,
-        ),
+        const SnackBar(content: Text('⚠️ Ese cupo ya está ocupado'), backgroundColor: Colors.orange),
       );
       return;
     }
 
+    final messenger = ScaffoldMessenger.of(context);
     try {
       await Supabase.instance.client.from('parqueadero').insert({
-        'spot': int.tryParse(cupo) ?? cupo,
+        'spot': cupoInt,
         'plate': placa,
         'name': nombre,
         'phone': telefono,
         'type': _tipoSeleccionado,
       });
 
-      if (mounted) {
-        Navigator.pop(context);
-        _limpiarFormulario();
-        await cargarDatos();
+      if (mounted) Navigator.pop(context);
+      _limpiarFormulario();
+      await cargarDatos(mostrarMensaje: false);
 
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('✅ Cupo registrado correctamente'),
-            backgroundColor: Colors.green,
-          ),
-        );
-      }
+      messenger.showSnackBar(
+        const SnackBar(content: Text('✅ Cupo registrado correctamente'), backgroundColor: Colors.green),
+      );
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('❌ Error al guardar: $e')),
-        );
-      }
+      messenger.showSnackBar(SnackBar(content: Text('❌ Error al guardar: $e')));
+    }
+  }
+
+  Future<void> liberarCupo(int cupo) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("🗑️ Liberar Cupo", style: TextStyle(color: Colors.black)),
+        content: Text("¿Estás seguro de que quieres liberar el cupo #$cupo?"),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text("Cancelar", style: TextStyle(color: Colors.black)),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text("SÍ, LIBERAR", style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true || !mounted) return;
+
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await Supabase.instance.client.from('parqueadero').delete().eq('spot', cupo);
+      await cargarDatos(mostrarMensaje: false);
+      messenger.showSnackBar(const SnackBar(content: Text('✅ Cupo liberado correctamente'), backgroundColor: Colors.green));
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('❌ Error al liberar: $e')));
     }
   }
 
@@ -136,39 +176,27 @@ class _DashboardScreenState extends State<DashboardScreen> {
     setState(() => _tipoSeleccionado = 'PASAJERO');
   }
 
-  // ✅ FORMULARIO MODAL PARA NUEVO CUPO
-  void mostrarFormularioNuevoCupo() {
+  void _mostrarFormularioNuevoCupo() {
     _limpiarFormulario();
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: const Color(0xFF1E1E1E),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       builder: (ctx) => Padding(
-        padding: EdgeInsets.only(
-          bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
-          left: 24,
-          right: 24,
-          top: 24,
-        ),
+        padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom + 20, left: 24, right: 24, top: 24),
         child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
-                children: const [
-                  Icon(Icons.add_circle, color: Colors.green, size: 32),
-                  SizedBox(width: 12),
-                  Text(
+                children: [
+                  const Icon(Icons.add_circle, color: Colors.green, size: 32),
+                  const SizedBox(width: 12),
+                  const Text(
                     "NUEVO CUPO",
-                    style: TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                    ),
+                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white),
                   ),
                 ],
               ),
@@ -193,17 +221,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 child: ElevatedButton.icon(
                   onPressed: guardarNuevoCupo,
                   icon: const Icon(Icons.save),
-                  label: const Text(
-                    "GUARDAR CUPO",
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
+                  label: const Text("GUARDAR CUPO", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.green,
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     elevation: 4,
                   ),
                 ),
@@ -228,10 +251,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           prefixIcon: Icon(icon, color: Colors.red),
           filled: true,
           fillColor: const Color(0xFF2C2C2C),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide.none,
-          ),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
         ),
       ),
     );
@@ -264,18 +284,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
       if (await canLaunchUrl(uri)) {
         await launchUrl(uri, mode: LaunchMode.externalApplication);
       } else {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No se pudo abrir la app de teléfono')));
-        }
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No se pudo abrir la app de teléfono')));
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error al llamar: $e')));
-      }
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error al llamar: $e')));
     }
   }
 
-  Future<void> llamarEmergencia() async {
+  void llamarEmergencia() {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -337,11 +353,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
           children: [
             const Icon(Icons.directions_car, color: Colors.white, size: 20),
             const SizedBox(height: 2),
-            Text("#$cupo", style: const TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.white)),
+            Text("#$cupo", style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white)),
             const Divider(height: 3, color: Colors.white54),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 2),
-              child: Text(plate, style: const TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.white), maxLines: 1, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center),
+              child: Text(plate, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white), maxLines: 1, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center),
             ),
           ],
         ),
@@ -366,11 +382,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
           children: [
             const Icon(Icons.directions_car, color: Colors.white, size: 20),
             const SizedBox(height: 2),
-            Text("#$cupo", style: const TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.white)),
+            Text("#$cupo", style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white)),
             const Divider(height: 3, color: Colors.white54),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 2),
-              child: Text(plate, style: const TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.white), maxLines: 1, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center),
+              child: Text(plate, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white), maxLines: 1, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center),
             ),
           ],
         ),
@@ -378,20 +394,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Widget _buildCupoVacio() {
-    return Container(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(colors: [Colors.green.withOpacity(0.3), Colors.green.withOpacity(0.5)], begin: Alignment.topLeft, end: Alignment.bottomRight),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.green, width: 1.5),
-      ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Icon(Icons.check_circle, color: Colors.white, size: 18),
-          const SizedBox(height: 2),
-          const Text("LIBRE", style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.white)),
-        ],
+  Widget _buildCupoVacio(int cupoNumero) {
+    return GestureDetector(
+      onTap: () => _mostrarFormularioNuevoCupo(),
+      child: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(colors: [Colors.green.withOpacity(0.3), Colors.green.withOpacity(0.5)], begin: Alignment.topLeft, end: Alignment.bottomRight),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.green, width: 1.5),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.check_circle, color: Colors.white, size: 18),
+            const SizedBox(height: 2),
+            Text("LIBRE #$cupoNumero", style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white)),
+          ],
+        ),
       ),
     );
   }
@@ -417,17 +436,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
             children: [
               const Icon(Icons.directions_car, color: Colors.white, size: 28),
               const SizedBox(width: 12),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text("Cupo #$cupo", style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
-                  const SizedBox(height: 4),
-                  Text(isFijo ? 'FIJO' : 'PASAJERO', style: TextStyle(fontSize: 12, color: Colors.white70)),
-                  const SizedBox(height: 4),
-                  Text(plate, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white)),
-                ],
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text("Cupo #$cupo", style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+                    const SizedBox(height: 4),
+                    Text(isFijo ? 'FIJO' : 'PASAJERO', style: TextStyle(fontSize: 12, color: Colors.white70)),
+                    const SizedBox(height: 4),
+                    Text(plate, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white)),
+                  ],
+                ),
               ),
-              const Spacer(),
               const Icon(Icons.arrow_forward_ios, color: Colors.white54, size: 16),
             ],
           ),
@@ -437,7 +457,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   List<dynamic> getFilteredCupos() {
-    List<dynamic> resultados = parqueadero;
+    List<dynamic> resultados = List.from(parqueadero);
     if (searchQuery.isNotEmpty) {
       final query = searchQuery.toLowerCase();
       resultados = resultados.where((r) {
@@ -451,7 +471,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       if (filtroTipo == 'Libres') {
         resultados = [];
       } else {
-        String tipoBD = filtroTipo.toUpperCase();
+        final tipoBD = filtroTipo == 'Fijos' ? 'FIJO' : 'PASAJERO';
         resultados = resultados.where((r) => r['type'] == tipoBD).toList();
       }
     }
@@ -462,6 +482,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (filtroTipo == 'Fijos' || filtroTipo == 'Pasajeros') return filteredCount;
     else if (filtroTipo == 'Libres') return totalCupos - parqueadero.length;
     else return filteredCount + (totalCupos - parqueadero.length);
+  }
+
+  List<int> _cuposLibres() {
+    final ocupados = parqueadero.map((r) => r['spot'] is int ? r['spot'] : int.tryParse(r['spot'].toString()) ?? -1).toSet();
+    return [for (var i = 1; i <= totalCupos; i++) if (!ocupados.contains(i)) i];
   }
 
   String _obtenerFechaHora() {
@@ -480,6 +505,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final fijos = parqueadero.where((r) => r['type'] == 'FIJO').length;
     final pasajeros = parqueadero.where((r) => r['type'] == 'PASAJERO').length;
     final disponibles = totalCupos - parqueadero.length;
+    final libres = _cuposLibres();
 
     return Scaffold(
       backgroundColor: const Color(0xFF121212),
@@ -516,7 +542,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ],
         ),
         actions: [
-          IconButton(icon: const Icon(Icons.refresh, color: Colors.red, size: 24), onPressed: cargarDatos, tooltip: "Actualizar datos"),
+          IconButton(icon: const Icon(Icons.refresh, color: Colors.red, size: 24), onPressed: () => cargarDatos(mostrarMensaje: true), tooltip: "Actualizar datos"),
           IconButton(icon: Icon(isGridView ? Icons.list : Icons.grid_view, color: Colors.red, size: 24), onPressed: () => setState(() => isGridView = !isGridView), tooltip: isGridView ? "Vista Lista" : "Vista Grid"),
           const SizedBox(width: 8),
         ],
@@ -579,7 +605,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
             child: isLoading
                 ? const Center(child: CircularProgressIndicator(color: Colors.red))
                 : filteredCupos.isEmpty && filtroTipo != 'Libres'
-                    ? const Center(child: Text("No se encontraron cupos", style: TextStyle(color: Colors.white54, fontSize: 16)))
+                    ? Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.car_rental, size: 64, color: Colors.white24),
+                            const SizedBox(height: 16),
+                            Text("No se encontraron cupos", style: TextStyle(color: Colors.white54, fontSize: 16)),
+                            const SizedBox(height: 8),
+                            Text("Agrega un nuevo cupo con el botón +", style: TextStyle(color: Colors.white38, fontSize: 12)),
+                          ],
+                        ),
+                      )
                     : isGridView
                         ? Padding(
                             padding: const EdgeInsets.all(6),
@@ -593,13 +630,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   if (tipo == 'FIJO') return _buildCupoFijo(registro);
                                   else return _buildCupoPasajero(registro);
                                 } else {
-                                  if (filtroTipo == 'Todos' || filtroTipo == 'Libres') return _buildCupoVacio();
+                                  if (filtroTipo == 'Todos' || filtroTipo == 'Libres') {
+                                    final libreIndex = index - filteredCupos.length;
+                                    if (libreIndex < libres.length) return _buildCupoVacio(libres[libreIndex]);
+                                  }
                                   return const SizedBox.shrink();
                                 }
                               },
                             ),
                           )
-                        : ListView.builder(padding: const EdgeInsets.all(10), itemCount: filteredCupos.length, itemBuilder: (context, index) => _buildListItem(filteredCupos[index])),
+                        : ListView.builder(
+                            padding: const EdgeInsets.all(10),
+                            itemCount: filteredCupos.length,
+                            itemBuilder: (context, index) => _buildListItem(filteredCupos[index]),
+                          ),
           ),
           Padding(
             padding: const EdgeInsets.all(10),
@@ -607,9 +651,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
         ],
       ),
-      // ✅ BOTÓN FLOTANTE PARA AGREGAR NUEVO CUPO
       floatingActionButton: FloatingActionButton(
-        onPressed: mostrarFormularioNuevoCupo,
+        onPressed: _mostrarFormularioNuevoCupo,
         backgroundColor: Colors.green,
         child: const Icon(Icons.add, color: Colors.white),
         tooltip: 'Agregar Nuevo Cupo',
@@ -712,6 +755,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ),
                 ),
               ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () => liberarCupo(int.tryParse(cupo) ?? 0),
+                icon: const Icon(Icons.delete_outline, size: 20),
+                label: const Text("LIBERAR CUPO", style: TextStyle(fontSize: 14)),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.red,
+                  side: const BorderSide(color: Colors.red),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+            ),
           ],
         ),
       ),
