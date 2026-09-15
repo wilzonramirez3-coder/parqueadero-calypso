@@ -651,6 +651,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
         ],
       ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.startFloat,
       floatingActionButton: FloatingActionButton(
         onPressed: _mostrarFormularioNuevoCupo,
         backgroundColor: Colors.green,
